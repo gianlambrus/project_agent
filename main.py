@@ -1,18 +1,22 @@
-import os 
-from pathlib import Path
+import re
+import uuid
 import sqlite3
+from pathlib import Path
 from typing import TypedDict
 from dotenv import load_dotenv
-from graph.nodes import run_agent_reasoning, tool_node
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import MessagesState, StateGraph, END
+from graph.nodes import run_agent_reasoning, run_agent_reflection, run_format_output, run_sumarize, safe_tool_node
 
 load_dotenv()
 
 AGENT_REASON="agent_reason"
 ACT="act"
+REFLECT="reflect"
+FORMATTER="formatter"
+SUMARIZER="sumarizer"
 LAST=-1
 
 def should_continue(state:MessagesState) -> str:
@@ -20,15 +24,43 @@ def should_continue(state:MessagesState) -> str:
         return END
     return ACT
 
+def after_reflect(state: MessagesState) -> str:
+    last = state["messages"][-1]
+    content = last.content if hasattr(last, "content") else str(last)
+    clean_content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    if "RESPUESTA_VALIDA" in clean_content:
+        if len(state["messages"]) > 6:
+            return SUMARIZER
+        return FORMATTER
+    return AGENT_REASON
+
+def get_last_content(messages:list) -> str:
+    for msg in reversed(messages):
+        if hasattr(msg, "content") and msg.content and msg.content.strip():
+            return msg.content.strip()
+    return "No se pudo generar una respuesta precisa."
+
+def clean_output(text: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
 graph_flow = StateGraph(MessagesState)
 
 graph_flow.add_node(AGENT_REASON, run_agent_reasoning)
 graph_flow.set_entry_point(AGENT_REASON)
-graph_flow.add_node(ACT, tool_node)
+graph_flow.add_node(FORMATTER, run_format_output)
+graph_flow.add_node(SUMARIZER, run_sumarize)
+graph_flow.add_node(REFLECT, run_agent_reflection)
+graph_flow.add_node(ACT, safe_tool_node)
 graph_flow.add_conditional_edges(AGENT_REASON, should_continue, {
     END:END,
     ACT:ACT})
-graph_flow.add_edge(ACT, AGENT_REASON)
+graph_flow.add_edge(ACT, REFLECT)
+graph_flow.add_conditional_edges(REFLECT, after_reflect, {
+    FORMATTER:FORMATTER, 
+    SUMARIZER:SUMARIZER,
+    AGENT_REASON:AGENT_REASON})
+graph_flow.add_edge(SUMARIZER, FORMATTER)
+graph_flow.add_edge(FORMATTER, END)
 
 sqlite_folder = Path("sqlite")
 sqlite_folder.mkdir(exist_ok=True)
@@ -40,24 +72,10 @@ with SqliteSaver.from_conn_string(str(checkpoint_path)) as memory:
     graph.get_graph().draw_mermaid_png(output_file_path="graph_flow.png")
 
     if __name__ == "__main__":
-        thread = {"configurable": {"thread_id": "777"}}
-        
-        initial_input = {"input": "test"}
-        
-        for event in graph.stream(initial_input, thread, stream_mode="values"):
-            print(event)
-        
-        print(graph.get_state(thread).next)    
-                
-        print(graph.get_state(thread))
-        
-        print(graph.get_state(thread).next)
-        
-        for event in graph.stream(input=None, config=thread, stream_mode="values"):
-            print(event)
+        thread = {"configurable": {"thread_id": str(uuid.uuid4())}}
     
         while True:
             user_text = input("Sobre qué querés hablar?: ")
-            res = graph.invoke({"messages": [HumanMessage(content=user_text)]},
-                    config=thread)
-            print(res["messages"][LAST].content)
+            res = graph.invoke({"messages": [HumanMessage(content=user_text)]}, config=thread)
+            print(clean_output(get_last_content(res["messages"])))
+            
