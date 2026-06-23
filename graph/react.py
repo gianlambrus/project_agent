@@ -1,11 +1,13 @@
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langchain_tavily import TavilySearch
-from datetime import datetime
 
 load_dotenv()
+
+_tavily = TavilySearch(max_results=3)
 
 @tool
 def time_tool() -> str:
@@ -19,8 +21,23 @@ def time_tool() -> str:
     time_str = today_day.strftime("%H:%M:%S")
     return f"Día {day_name}, {date_str} a las {time_str}"
 
+@tool
+def web_search(query: str) -> str:
+    """
+    Busca información actual en internet. Usala para datos que cambien con el tiempo.
+    Usala para datos como el clima, noticias, precios, eventos recientes, entre otros.
+    Para consultas de clima, formulá la query incluyendo la palabra "actual"
+    o "ahora" (ej: "clima actual Buenos Aires") en lugar de "pronóstico",
+    para obtener condiciones del momento y no un forecast extendido.
+    
+    Args:
+        query: Consulta de búsqueda en lenguaje natural, sin fechas ni rangos
+    """
+    result = _tavily.invoke({"query": query})
+    return str(result)
+    
 
-tools = [TavilySearch(max_results=1), time_tool]
+tools = [web_search, time_tool]
 
 llm = ChatOllama(model="qwen3:8b",
                  api_key=os.getenv("OLLAMA_API_KEY"),
