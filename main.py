@@ -4,13 +4,13 @@ import sqlite3
 from pathlib import Path
 from typing import TypedDict
 from dotenv import load_dotenv
+load_dotenv()
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import MessagesState, StateGraph, END
 from graph.nodes import run_agent_reasoning, run_agent_reflection, run_format_output, run_sumarize, safe_tool_node
 
-load_dotenv()
 
 AGENT_REASON="agent_reason"
 ACT="act"
