@@ -3,6 +3,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_tavily import TavilySearch
 
 load_dotenv()
@@ -36,9 +37,25 @@ def web_search(query: str) -> str:
     result = _tavily.invoke({"query": query})
     return str(result)
     
+def get_llm():
+    """
+    Si OLLAMA_HOST está seteado (o está en modo local), usar Ollama.
+    Sino, se usa Groq como fallback gratuito (Codespaces / Streamlit Cloud).
+    """
+    if os.getenv("USE_LOCAL_LLM") == "true":
+        return ChatOllama(
+            model="qwen3:8b",
+            api_key=os.getenv("OLLAMA_API_KEY"),
+            temperature=0
+        )
+    else:
+        return ChatGroq(
+            model="qwen3:8b",
+            api_key=os.getenv("GROQ_API_KEY"),
+            temperature=0
+        )
+        
 
 tools = [web_search, time_tool]
 
-llm = ChatOllama(model="qwen3:8b",
-                 api_key=os.getenv("OLLAMA_API_KEY"),
-                 temperature=0).bind_tools(tools)
+llm = get_llm().bind_tools(tools)
